@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../blocs/notes/notes_bloc.dart';
+import '../../blocs/connectivity/connectivity_bloc.dart';
+import '../../blocs/auth/auth_bloc.dart';
 import '../../models/note.dart';
-import '../../services/note_service.dart';
-import '../../services/auth_service.dart';
-import '../../services/connectivity_service.dart';
 import '../../widgets/offline_banner.dart';
 import 'note_edit_screen.dart';
 
@@ -14,76 +15,22 @@ class NoteListScreen extends StatefulWidget {
 }
 
 class _NoteListScreenState extends State<NoteListScreen> {
-  final _noteService = NoteService();
-  final _authService = AuthService();
-  final _connectivityService = ConnectivityService();
-  List<Note> _notes = [];
-  List<Note> _filteredNotes = [];
-  bool _loading = true;
-  bool _isOffline = false;
   final _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _checkConnectivity();
-    _loadNotes();
-    _connectivityService.startMonitoring((isOnline) {
-      if (mounted) {
-        setState(() => _isOffline = !isOnline);
-      }
-    });
+    context.read<NotesBloc>().add(const LoadNotes());
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _connectivityService.dispose();
     super.dispose();
   }
 
-  Future<void> _checkConnectivity() async {
-    final isOnline = await _connectivityService.checkConnectivity();
-    if (mounted) setState(() => _isOffline = !isOnline);
-  }
-
-  Future<void> _loadNotes() async {
-    setState(() => _loading = true);
-    try {
-      final notes = await _noteService.getNotes();
-      if (mounted) {
-        setState(() {
-          _notes = notes;
-          _filteredNotes = notes;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load notes: $e'),
-            backgroundColor: Colors.red.shade600,
-          ),
-        );
-      }
-    }
-  }
-
-  void _filterNotes(String query) {
-    setState(() {
-      if (query.isEmpty) {
-        _filteredNotes = _notes;
-      } else {
-        _filteredNotes = _notes
-            .where((n) => n.title.toLowerCase().contains(query.toLowerCase()))
-            .toList();
-      }
-    });
-  }
-
   Future<void> _deleteNote(Note note) async {
+    final bloc = context.read<NotesBloc>();
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -104,23 +51,8 @@ class _NoteListScreenState extends State<NoteListScreen> {
     );
 
     if (confirm == true) {
-      try {
-        await _noteService.deleteNote(note.id);
-        _loadNotes();
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to delete note: $e'),
-            backgroundColor: Colors.red.shade600,
-          ),
-        );
-      }
+      bloc.add(DeleteNote(note.id));
     }
-  }
-
-  Future<void> _signOut() async {
-    await _authService.signOut();
   }
 
   String _timeAgo(DateTime date) {
@@ -141,13 +73,21 @@ class _NoteListScreenState extends State<NoteListScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sign Out',
-            onPressed: _signOut,
+            onPressed: () =>
+                context.read<AuthBloc>().add(const LogoutRequested()),
           ),
         ],
       ),
       body: Column(
         children: [
-          if (_isOffline) const OfflineBanner(),
+          BlocBuilder<ConnectivityBloc, ConnectivityState>(
+            builder: (context, state) {
+              if (state is ConnectivityOffline) {
+                return const OfflineBanner();
+              }
+              return const SizedBox.shrink();
+            },
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: TextField(
@@ -165,112 +105,141 @@ class _NoteListScreenState extends State<NoteListScreen> {
                     .surfaceContainerHighest
                     .withValues(alpha: 0.3),
               ),
-              onChanged: _filterNotes,
+              onChanged: (query) =>
+                  context.read<NotesBloc>().add(SearchNotes(query)),
             ),
           ),
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _filteredNotes.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.note_add_outlined,
-                              size: 64,
-                              color: Colors.grey[400],
+            child: BlocConsumer<NotesBloc, NotesState>(
+              listener: (context, state) {
+                if (state is NotesError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(state.message),
+                      backgroundColor: Colors.red.shade600,
+                    ),
+                  );
+                }
+              },
+              builder: (context, state) {
+                if (state is NotesLoading) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (state is NotesLoaded) {
+                  if (state.filteredNotes.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.note_add_outlined,
+                            size: 64,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            state.notes.isEmpty
+                                ? 'No notes yet. Tap + to create one!'
+                                : 'No notes match your search.',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 16,
                             ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _notes.isEmpty
-                                  ? 'No notes yet. Tap + to create one!'
-                                  : 'No notes match your search.',
-                              style: TextStyle(
-                                color: Colors.grey[500],
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _loadNotes,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _filteredNotes.length,
-                          itemBuilder: (context, index) {
-                            final note = _filteredNotes[index];
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                ),
-                                title: Text(
-                                  note.title,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      note.content,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _timeAgo(note.updatedAt),
-                                      style: TextStyle(
-                                        color: Colors.grey[400],
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                trailing: IconButton(
-                                  icon: Icon(
-                                    Icons.delete_outline,
-                                    color: Colors.red[400],
-                                  ),
-                                  onPressed: () => _deleteNote(note),
-                                ),
-                                onTap: () async {
-                                  final result = await Navigator.push<bool>(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          NoteEditScreen(note: note),
-                                    ),
-                                  );
-                                  if (result == true) _loadNotes();
-                                },
-                              ),
-                            );
-                          },
-                        ),
+                          ),
+                        ],
                       ),
+                    );
+                  }
+
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      context.read<NotesBloc>().add(const LoadNotes());
+                    },
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: state.filteredNotes.length,
+                      itemBuilder: (context, index) {
+                        final note = state.filteredNotes[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            title: Text(
+                              note.title,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 4),
+                                Text(
+                                  note.content,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _timeAgo(note.updatedAt),
+                                  style: TextStyle(
+                                    color: Colors.grey[400],
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            trailing: IconButton(
+                              icon: Icon(
+                                Icons.delete_outline,
+                                color: Colors.red[400],
+                              ),
+                              onPressed: () => _deleteNote(note),
+                            ),
+                            onTap: () async {
+                              final notesBloc = context.read<NotesBloc>();
+                              final result = await Navigator.push<bool>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => NoteEditScreen(note: note),
+                                ),
+                              );
+                              if (result == true) {
+                                notesBloc.add(const LoadNotes());
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                }
+
+                return const SizedBox.shrink();
+              },
+            ),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
+          final notesBloc = context.read<NotesBloc>();
           final result = await Navigator.push<bool>(
             context,
             MaterialPageRoute(builder: (_) => const NoteEditScreen()),
           );
-          if (result == true) _loadNotes();
+          if (result == true) {
+            notesBloc.add(const LoadNotes());
+          }
         },
         child: const Icon(Icons.add),
       ),

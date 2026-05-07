@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../blocs/notes/notes_bloc.dart';
 import '../../models/note.dart';
-import '../../services/note_service.dart';
 
 class NoteEditScreen extends StatefulWidget {
   final Note? note;
@@ -15,8 +16,6 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  final _noteService = NoteService();
-  bool _loading = false;
   bool _isEditing = false;
 
   @override
@@ -36,35 +35,18 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  void _save() {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _loading = true);
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
 
-    try {
-      if (_isEditing) {
-        await _noteService.updateNote(
-          widget.note!.id,
-          _titleController.text.trim(),
-          _contentController.text.trim(),
-        );
-      } else {
-        await _noteService.createNote(
-          _titleController.text.trim(),
-          _contentController.text.trim(),
-        );
-      }
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to save note: $e'),
-          backgroundColor: Colors.red.shade600,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    if (_isEditing) {
+      context.read<NotesBloc>().add(
+            UpdateNote(widget.note!.id, title, content),
+          );
+    } else {
+      context.read<NotesBloc>().add(CreateNote(title, content));
     }
   }
 
@@ -74,61 +56,81 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       appBar: AppBar(
         title: Text(_isEditing ? 'Edit Note' : 'New Note'),
         actions: [
-          TextButton(
-            onPressed: _loading ? null : _save,
-            child: _loading
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Save', style: TextStyle(fontSize: 16)),
+          BlocBuilder<NotesBloc, NotesState>(
+            builder: (context, state) {
+              final loading = state is NotesLoading;
+              return TextButton(
+                onPressed: loading ? null : _save,
+                child: loading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Save', style: TextStyle(fontSize: 16)),
+              );
+            },
           ),
         ],
       ),
-      body: Form(
-        key: _formKey,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              TextFormField(
-                controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(),
-                  hintText: 'Enter note title',
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
-                    return 'Title is required';
-                  }
-                  return null;
-                },
-                textInputAction: TextInputAction.next,
+      body: BlocListener<NotesBloc, NotesState>(
+        listener: (context, state) {
+          if (state is NoteSaved) {
+            Navigator.pop(context, true);
+          }
+          if (state is NotesError) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(state.message),
+                backgroundColor: Colors.red.shade600,
               ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: TextFormField(
-                  controller: _contentController,
+            );
+          }
+        },
+        child: Form(
+          key: _formKey,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                TextFormField(
+                  controller: _titleController,
                   decoration: const InputDecoration(
-                    labelText: 'Content',
+                    labelText: 'Title',
                     border: OutlineInputBorder(),
-                    hintText: 'Write your note here...',
-                    alignLabelWithHint: true,
+                    hintText: 'Enter note title',
                   ),
-                  maxLines: null,
-                  expands: true,
-                  textAlignVertical: TextAlignVertical.top,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) {
-                      return 'Content is required';
+                      return 'Title is required';
                     }
                     return null;
                   },
+                  textInputAction: TextInputAction.next,
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                Expanded(
+                  child: TextFormField(
+                    controller: _contentController,
+                    decoration: const InputDecoration(
+                      labelText: 'Content',
+                      border: OutlineInputBorder(),
+                      hintText: 'Write your note here...',
+                      alignLabelWithHint: true,
+                    ),
+                    maxLines: null,
+                    expands: true,
+                    textAlignVertical: TextAlignVertical.top,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) {
+                        return 'Content is required';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
