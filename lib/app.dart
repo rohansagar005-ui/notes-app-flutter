@@ -7,6 +7,7 @@ import 'services/auth_service.dart';
 import 'services/note_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/notes/note_list_screen.dart';
+import 'screens/splash_screen.dart';
 
 class NotesApp extends StatelessWidget {
   final AuthService authService;
@@ -43,6 +44,9 @@ class NotesApp extends StatelessWidget {
         ),
         home: BlocBuilder<AuthBloc, AuthState>(
           builder: (context, state) {
+            if (state is AuthInitial) {
+              return const SplashScreen();
+            }
             if (state is Authenticated) {
               return const NoteListScreen();
             }
