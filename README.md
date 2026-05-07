@@ -35,10 +35,26 @@ A Flutter notes application with Supabase backend featuring authentication, secu
 ## Prerequisites
 
 - Flutter SDK (3.x+)
-- A Supabase account (free tier works)
 - Android build tools (for APK)
 
-## Setup Instructions
+## Quick Start
+
+This project comes pre-configured with a Supabase project. To run it:
+
+```bash
+flutter pub get
+flutter run
+```
+
+Or build the APK:
+
+```bash
+flutter build apk --debug
+```
+
+The APK will be at `build/app/outputs/flutter-apk/app-debug.apk`.
+
+## Manual Setup (if using a different Supabase project)
 
 ### 1. Supabase Project Setup
 
@@ -51,27 +67,12 @@ A Flutter notes application with Supabase backend featuring authentication, secu
 
 ### 2. Configure the App
 
-Open `lib/config/supabase_config.dart` and replace the placeholder values:
+Open `lib/config/supabase_config.dart` and update the values:
 
 ```dart
 static const String supabaseUrl = 'https://your-project.supabase.co';
 static const String supabaseAnonKey = 'your-anon-key-here';
 ```
-
-### 3. Run Locally
-
-```bash
-flutter pub get
-flutter run
-```
-
-### 4. Build APK
-
-```bash
-flutter build apk --debug
-```
-
-The APK will be at `build/app/outputs/flutter-apk/app-debug.apk`.
 
 ## Database Schema
 
